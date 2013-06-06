@@ -49,28 +49,28 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 - (id)init;
 {
     if (self = [super init]) {
-        
+
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowHidden:) name:UIWindowDidBecomeHiddenNotification object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowShown:) name:UIWindowDidBecomeVisibleNotification object:nil];
-        
+
         UIPanGestureRecognizer *panGR = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleMovePanGesure:)];
         panGR.maximumNumberOfTouches = 1;
         UIPinchGestureRecognizer *pinchGR = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handleResizePinchGesture:)];
-        
+
         self.highlightOverlay = [[UIView alloc] initWithFrame:CGRectZero];
         self.highlightOverlay.layer.borderWidth = 1.0;
-        
+
         [self.highlightOverlay addGestureRecognizer:panGR];
         [self.highlightOverlay addGestureRecognizer:pinchGR];
-        
+
         UITapGestureRecognizer *inspectTapGR = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleInspectTapGesture:)];
         UIPanGestureRecognizer *inspectPanGR = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleInspectPanGesture:)];
         inspectPanGR.maximumNumberOfTouches = 1;
-        
+
         self.inspectModeOverlay = [[UIView alloc] initWithFrame:CGRectZero];
         self.inspectModeOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         self.inspectModeOverlay.backgroundColor = [UIColor clearColor];
-        
+
         [self.inspectModeOverlay addGestureRecognizer:inspectTapGR];
         [self.inspectModeOverlay addGestureRecognizer:inspectPanGR];
     }
@@ -100,38 +100,38 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     // Only do it once to avoid swapping back if this method is called again
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        
+
         Method original, swizzle;
         Class viewClass = [UIView class];
-        
+
         original = class_getInstanceMethod(viewClass, @selector(addSubview:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_addSubview:));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(bringSubviewToFront:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_bringSubviewToFront:));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(sendSubviewToBack:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_sendSubviewToBack:));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(removeFromSuperview));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_removeFromSuperview));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(insertSubview:atIndex:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_insertSubview:atIndex:));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(insertSubview:aboveSubview:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_insertSubview:aboveSubview:));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(insertSubview:belowSubview:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_insertSubview:belowSubview:));
         method_exchangeImplementations(original, swizzle);
-        
+
         original = class_getInstanceMethod(viewClass, @selector(exchangeSubviewAtIndex:withSubviewAtIndex:));
         swizzle = class_getInstanceMethod(viewClass, @selector(pd_swizzled_exchangeSubviewAtIndex:withSubviewAtIndex:));
         method_exchangeImplementations(original, swizzle);
@@ -150,10 +150,10 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     if (![_viewKeyPathsToDisplay isEqualToArray:viewKeyPathsToDisplay]) {
         // Stop tracking all the views to remove KVO
         [self stopTrackingAllViews];
-        
+
         // Now that the observers have been removed, it's safe to change the keyPaths array
         _viewKeyPathsToDisplay = viewKeyPathsToDisplay;
-        
+
         // Refresh the DOM tree to see the new attributes
         [self.domain documentUpdated];
     }
@@ -176,7 +176,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         [self configureHighlightOverlayWithConfig:highlightConfig];
         [self revealHighlightOverlayForView:objectForNodeId allowInteractions:YES];
     }
-    
+
     callback(nil);
 }
 
@@ -184,7 +184,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     [self.highlightOverlay removeFromSuperview];
     self.viewToHighlight = nil;
-    
+
     callback(nil);
 }
 
@@ -192,21 +192,27 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     UIView *view = [self.objectsForNodeIds objectForKey:nodeId];
     [view removeFromSuperview];
-    
+
     callback(nil);
 }
 
 - (void)domain:(PDDOMDomain *)domain setAttributesAsTextWithNodeId:(NSNumber *)nodeId text:(NSString *)text name:(NSString *)name callback:(void (^)(id))callback;
 {
+    // The "class" attribute cannot be edited. Bail early
+    if ([name isEqualToString:@"class"]) {
+        callback(nil);
+        return;
+    }
+
     id nodeObject = [self.objectsForNodeIds objectForKey:nodeId];
     const char *typeEncoding = [self typeEncodingForKeyPath:name onObject:nodeObject];
-    
+
     // Try to parse out the value
     NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:kPDDOMAttributeParsingRegex options:0 error:NULL];
     NSTextCheckingResult *firstMatch = [regex firstMatchInString:text options:0 range:NSMakeRange(0, [text length])];
     if (firstMatch) {
         NSString *valueString = [text substringWithRange:[firstMatch rangeAtIndex:1]];
-        
+
         // Note: this is by no means complete...
         // Allow BOOLs to be set with YES/NO
         if (typeEncoding && !strcmp(typeEncoding, @encode(BOOL)) && ([valueString isEqualToString:@"YES"] || [valueString isEqualToString:@"NO"])) {
@@ -221,12 +227,18 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         } else if (typeEncoding && !strcmp(typeEncoding, @encode(CGRect))) {
             CGRect rect = CGRectFromString(valueString);
             [nodeObject setValue:[NSValue valueWithCGRect:rect] forKeyPath:name];
+        } else if (typeEncoding && !strcmp(typeEncoding, @encode(id))) {
+            // Only support editing for string objects (due to the trivial mapping between the string and its description)
+            id currentValue = [nodeObject valueForKeyPath:name];
+            if ([currentValue isKindOfClass:[NSString class]]) {
+                [nodeObject setValue:valueString forKeyPath:name];
+            }
         } else {
             NSNumber *number = @([valueString doubleValue]);
             [nodeObject setValue:number forKeyPath:name];
         }
     }
-    
+
     callback(nil);
 }
 
@@ -240,7 +252,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     } else {
         [self.inspectModeOverlay removeFromSuperview];
     }
-    
+
     callback(nil);
 }
 
@@ -257,18 +269,18 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         case UIGestureRecognizerStateBegan:
             self.lastPanPoint = [panGR locationInView:self.viewToHighlight.superview];
             break;
-            
+
         default: {
             // Convert to superview coordinates for a consistent basis
             CGPoint newPanPoint = [panGR locationInView:self.viewToHighlight.superview];
             CGFloat deltaX = newPanPoint.x - self.lastPanPoint.x;
             CGFloat deltaY = newPanPoint.y - self.lastPanPoint.y;
-            
+
             CGRect frame = self.viewToHighlight.frame;
             frame.origin.x += deltaX;
             frame.origin.y += deltaY;
             self.viewToHighlight.frame = frame;
-            
+
             self.lastPanPoint = newPanPoint;
             break;
         }
@@ -282,34 +294,34 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
             self.originalPinchFrame = self.viewToHighlight.frame;
             self.originalPinchLocation = [pinchGR locationInView:self.viewToHighlight.superview];
             break;
-        
+
         case UIGestureRecognizerStateChanged: {
             // Scale the frame by the pinch amount
             CGFloat scale = [pinchGR scale];
             CGRect newFrame = self.originalPinchFrame;
             CGFloat scaleByFactor = (scale - 1.0) / 1.0;
             scaleByFactor /= 3.0;
-            
+
             newFrame.size.width *= 1.0 + scaleByFactor;
             newFrame.size.height *= 1.0 + scaleByFactor;
-            
+
             // Translate the center by the difference between the current centroid and the original centroid
             CGPoint location = [pinchGR locationInView:self.viewToHighlight.superview];
             CGPoint center = CGPointMake(floor(CGRectGetMidX(self.originalPinchFrame)), floor(CGRectGetMidY(self.originalPinchFrame)));
             center.x += location.x - self.originalPinchLocation.x;
             center.y += location.y - self.originalPinchLocation.y;
-            
+
             newFrame.origin.x = center.x - newFrame.size.width / 2.0;
             newFrame.origin.y = center.y - newFrame.size.height / 2.0;
             self.viewToHighlight.frame = newFrame;
             break;
         }
-        
+
         case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateCancelled:
             self.viewToHighlight.frame = CGRectIntegral(self.viewToHighlight.frame);
             break;
-            
+
         default:
             break;
     }
@@ -323,11 +335,11 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         case UIGestureRecognizerStateRecognized:
             [self inspectViewAtPoint:[tapGR locationInView:nil]];
             break;
-            
+
         default:
             break;
     }
-    
+
 }
 
 - (void)handleInspectPanGesture:(UIPanGestureRecognizer *)panGR;
@@ -347,7 +359,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
             // When the user finishes dragging, send the inspect command
             [self inspectViewAtPoint:[panGR locationInView:nil]];
             break;
-            
+
         default:
             break;
     }
@@ -357,14 +369,14 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     PDInspectorDomain *inspectorDomain = [[PDInspectorDomainController defaultInstance] domain];
     PDRuntimeRemoteObject *remoteObject = [[PDRuntimeRemoteObject alloc] init];
-    
+
     UIView *chosenView = [self chooseViewAtPoint:point givenStartingView:[[UIApplication sharedApplication] keyWindow]];
     NSNumber *chosenNodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:chosenView]];
-    
+
     remoteObject.type = @"object";
     remoteObject.subtype = @"node";
     remoteObject.objectId = [chosenNodeId stringValue];
-    
+
     [inspectorDomain inspectWithObject:remoteObject hints:nil];
     [self.inspectModeOverlay removeFromSuperview];
 }
@@ -379,7 +391,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
             return [self chooseViewAtPoint:point givenStartingView:subview];
         }
     }
-    
+
     // We didn't find anything in the subviews, so just return the starting view
     return startingView;
 }
@@ -393,15 +405,15 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     NSNumber *g = [contentColor valueForKey:@"g"];
     NSNumber *b = [contentColor valueForKey:@"b"];
     NSNumber *a = [contentColor valueForKey:@"a"];
-    
+
     self.highlightOverlay.backgroundColor = [UIColor colorWithRed:[r floatValue] / 255.0 green:[g floatValue] / 255.0 blue:[b floatValue] / 255.0 alpha:[a floatValue]];
-    
+
     PDDOMRGBA *borderColor = [highlightConfig valueForKey:@"borderColor"];
     r = [borderColor valueForKey:@"r"];
     g = [borderColor valueForKey:@"g"];
     b = [borderColor valueForKey:@"b"];
     a = [borderColor valueForKey:@"a"];
-    
+
     self.highlightOverlay.layer.borderColor = [[UIColor colorWithRed:[r floatValue] / 255.0 green:[g floatValue] / 255.0 blue:[b floatValue] / 255.0 alpha:[a floatValue]] CGColor];
 }
 
@@ -409,20 +421,20 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     // Add a highlight overlay directly to the window if this is a window, otherwise to the view's window
     self.viewToHighlight = view;
-    
+
     UIWindow *window = self.viewToHighlight.window;
     CGRect highlightFrame = CGRectZero;
-    
+
     if (!window && [self.viewToHighlight isKindOfClass:[UIWindow class]]) {
         window = (UIWindow *)self.viewToHighlight;
         highlightFrame = window.bounds;
     } else {
         highlightFrame = [window convertRect:self.viewToHighlight.frame fromView:self.viewToHighlight.superview];
     }
-    
+
     self.highlightOverlay.frame = highlightFrame;
     self.highlightOverlay.userInteractionEnabled = interactionEnabled;
-    
+
     // Make sure the highlight goes behind the inspect overlay if it's on screen
     if (self.inspectModeOverlay.superview == window) {
         [window insertSubview:self.highlightOverlay belowSubview:self.inspectModeOverlay];
@@ -449,21 +461,21 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     if ([self shouldIgnoreView:view] || !self.objectsForNodeIds) {
         return;
     }
-    
+
     NSNumber *nodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:view]];
 
     // Only proceed if this is a node we know about
     if ([self.objectsForNodeIds objectForKey:nodeId]) {
-        
+
         NSNumber *parentNodeId = nil;
-        
+
         if (view.superview) {
             parentNodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:view.superview]];
         } else if ([view isKindOfClass:[UIWindow class]]) {
             // Windows are always children of the root element node
             parentNodeId = @(1);
         }
-        
+
         [self stopTrackingView:view];
         [self.domain childNodeRemovedWithParentNodeId:parentNodeId nodeId:nodeId];
     }
@@ -481,9 +493,9 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     if (view.superview) {
         parentNodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:view.superview]];
     }
-    
+
     if ([self.objectsForNodeIds objectForKey:parentNodeId]) {
-        
+
         PDDOMNode *node = [self nodeForView:view];
 
         // Find the sibling view to insert the node in the right place
@@ -491,28 +503,28 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         // We essentialy dispay the subviews array backwards.
         NSNumber *previousNodeId = nil;
         NSUInteger indexOfView = [view.superview.subviews indexOfObject:view];
-        
+
         // If this is the last subview in the array, it has no previous node.
         if (indexOfView < [view.superview.subviews count] - 1) {
             UIView *aheadSibling = [view.superview.subviews objectAtIndex:indexOfView + 1];
             previousNodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:aheadSibling]];
         }
-        
+
         [self.domain childNodeInsertedWithParentNodeId:parentNodeId previousNodeId:previousNodeId node:node];
     } else if ([view isKindOfClass:[UIWindow class]]) {
-        
+
         PDDOMNode *node = [self nodeForView:view];
-        
+
         // Look at the other windows to find where to place this window
         NSNumber *previousNodeId = nil;
         NSArray *windows = [[UIApplication sharedApplication] windows];
         NSUInteger indexOfWindow = [windows indexOfObject:view];
-        
+
         if (indexOfWindow > 0) {
             UIWindow *previousWindow = [windows objectAtIndex:indexOfWindow - 1];
             previousNodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:previousWindow]];
         }
-        
+
         // Note that windows are always children of the root element node (id 1)
         [self.domain childNodeInsertedWithParentNodeId:@(1) previousNodeId:previousNodeId node:node];
     }
@@ -521,10 +533,10 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 - (void)startTrackingView:(UIView *)view withNodeId:(NSNumber *)nodeId;
 {
     NSAssert(view != self.highlightOverlay, @"The highlight overlay should not be tracked. We update its frame in the KVO observe method, so tracking it will lead to infinite recursion");
-    
+
     [self.nodeIdsForObjects setObject:nodeId forKey:[NSValue valueWithNonretainedObject:view]];
     [self.objectsForNodeIds setObject:view forKey:nodeId];
-    
+
     // Use KVO to keep the displayed properties fresh
     for (NSString *keyPath in self.viewKeyPathsToDisplay) {
         [view addObserver:self forKeyPath:keyPath options:NSKeyValueObservingOptionNew context:NULL];
@@ -535,28 +547,28 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     NSValue *viewKey = [NSValue valueWithNonretainedObject:view];
     NSNumber *nodeId = [self.nodeIdsForObjects objectForKey:viewKey];
-    
+
     // Bail early if we weren't tracking this view
     if (!nodeId) {
         return;
     }
-    
+
     // Recurse to get any nested views
     for (UIView *subview in view.subviews) {
         [self stopTrackingView:subview];
     }
-    
+
     // Remove the highlight if necessary
     if (view == self.viewToHighlight) {
         [self.highlightOverlay removeFromSuperview];
         self.viewToHighlight = nil;
     }
-    
+
     // Unregister from KVO
     for (NSString *keyPath in self.viewKeyPathsToDisplay) {
         [view removeObserver:self forKeyPath:keyPath];
     }
-    
+
     // Important that this comes last, so we don't get KVO observations for objects we don't konw about
     [self.nodeIdsForObjects removeObjectForKey:viewKey];
     [self.objectsForNodeIds removeObjectForKey:nodeId];
@@ -573,19 +585,19 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     // Make sure this is a node we know about and a key path we're observing
     NSNumber *nodeId = [self.nodeIdsForObjects objectForKey:[NSValue valueWithNonretainedObject:object]];
-    
+
     if ([self.objectsForNodeIds objectForKey:nodeId] && [self.viewKeyPathsToDisplay containsObject:keyPath]) {
         // Update the attributes on the DOM node
         NSString *newValue = [self stringForValue:[change objectForKey:NSKeyValueChangeNewKey] atKeyPath:keyPath onObject:object];
         [self.domain attributeModifiedWithNodeId:nodeId name:keyPath value:newValue];
     }
-    
+
     // If this is the view we're highlighting, update appropriately
     if (object == self.viewToHighlight && [keyPath isEqualToString:@"frame"]) {
         CGRect updatedFrame = [[change objectForKey:NSKeyValueChangeNewKey] CGRectValue];
         self.highlightOverlay.frame = [self.viewToHighlight.superview convertRect:updatedFrame toView:nil];
     }
-    
+
     // Note that we do not call [super observeValueForKeyPath:...] because super doesn't implement the method
 }
 
@@ -608,7 +620,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     rootNode.nodeType = @(kPDDOMNodeTypeDocument);
     rootNode.nodeName = @"#document";
     rootNode.children = @[ [self rootElement] ];
-    
+
     return rootNode;
 }
 
@@ -619,7 +631,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     rootElement.nodeType = @(kPDDOMNodeTypeElement);
     rootElement.nodeName = @"iosml";
     rootElement.children = [self windowNodes];
-    
+
     return rootElement;
 }
 
@@ -627,14 +639,14 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     NSArray *windows = [[UIApplication sharedApplication] windows];
     NSMutableArray *windowNodes = [NSMutableArray arrayWithCapacity:[windows count]];
-    
+
     for (id window in windows) {
         PDDOMNode *windowNode = [self nodeForView:window];
         if (windowNode) {
             [windowNodes addObject:windowNode];
         }
     }
-    
+
     return windowNodes;
 }
 
@@ -644,7 +656,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     if ([self shouldIgnoreView:view]) {
         return nil;
     }
-    
+
     // Build the child nodes by recursing on this view's subviews
     NSMutableArray *childNodes = [[NSMutableArray alloc] initWithCapacity:[view.subviews count]];
     for (UIView *subview in [view.subviews reverseObjectEnumerator]) {
@@ -653,10 +665,10 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
             [childNodes addObject:childNode];
         }
     }
-    
+
     PDDOMNode *viewNode = [self elementNodeForObject:view withChildNodes:childNodes];
     [self startTrackingView:view withNodeId:viewNode.nodeId];
-    
+
     return viewNode;
 }
 
@@ -664,7 +676,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 {
     PDDOMNode *elementNode = [[PDDOMNode alloc] init];
     elementNode.nodeType = @(kPDDOMNodeTypeElement);
-    
+
     if ([object isKindOfClass:[UIWindow class]]) {
         elementNode.nodeName = @"window";
     } else if ([object isKindOfClass:[UIView class]]) {
@@ -672,30 +684,13 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     } else {
         elementNode.nodeName = @"object";
     }
-    
-    if ([object respondsToSelector:@selector(text)]) {
-        NSString *text = [object text];
-        if ([text length] > 0) {
-            children = [children arrayByAddingObject:[self textNodeForString:[object text]]];
-        }
-    }
-    
+
     elementNode.children = children;
     elementNode.childNodeCount = @([elementNode.children count]);
     elementNode.nodeId = [self getAndIncrementNodeIdCount];
     elementNode.attributes = [self attributesArrayForObject:object];
-    
-    return elementNode;
-}
 
-- (PDDOMNode *)textNodeForString:(NSString *)string;
-{
-    PDDOMNode *textNode = [[PDDOMNode alloc] init];
-    textNode.nodeId = [self getAndIncrementNodeIdCount];
-    textNode.nodeType = @(kPDDOMNodeTypeText);
-    textNode.nodeValue = string;
-    
-    return textNode;
+    return elementNode;
 }
 
 #pragma mark - Attribute Generation
@@ -706,21 +701,45 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     if (!object) {
         return nil;
     }
-    
-    NSMutableArray *attributes = [NSMutableArray arrayWithArray:@[ @"class", [[object class] description] ]];
-    
+
+    NSString *className = [[object class] description];
+
+    // Thanks to http://petersteinberger.com/blog/2012/pimping-recursivedescription/
+    SEL viewDelSEL = NSSelectorFromString([NSString stringWithFormat:@"%@wDelegate", @"_vie"]);
+    if ([object respondsToSelector:viewDelSEL]) {
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        UIViewController *vc = [object performSelector:viewDelSEL];
+#pragma clang diagnostic pop
+
+        if (vc) {
+            className = [className stringByAppendingFormat:@" (%@)", [vc class]];
+        }
+    }
+
+    NSMutableArray *attributes = [NSMutableArray arrayWithArray:@[ @"class", className ]];
+
     if ([object isKindOfClass:[UIView class]]) {
         // Get strings for all the key paths in viewKeyPathsToDisplay
         for (NSString *keyPath in self.viewKeyPathsToDisplay) {
-            
-            NSValue *value = [object valueForKeyPath:keyPath];
+
+            NSValue *value = nil;
+
+            @try {
+                value = [object valueForKeyPath:keyPath];
+            } @catch (NSException *exception) {
+                // Continue if valueForKeyPath fails (ie KVC non-compliance)
+                continue;
+            }
+
             NSString *stringValue = [self stringForValue:value atKeyPath:keyPath onObject:object];
             if (stringValue) {
                 [attributes addObjectsFromArray:@[ keyPath, stringValue ]];
             }
         }
     }
-    
+
     return attributes;
 }
 
@@ -730,6 +749,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
     const char *typeEncoding = [self typeEncodingForKeyPath:keyPath onObject:object];
 
     if (typeEncoding) {
+        // Special structs
         if (!strcmp(typeEncoding,@encode(BOOL))) {
             stringValue = [(id)value boolValue] ? @"YES" : @"NO";
         } else if (!strcmp(typeEncoding,@encode(CGPoint))) {
@@ -743,8 +763,13 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         }
     }
 
+    // Boxed numeric primitives
     if (!stringValue && [value isKindOfClass:[NSNumber class]]) {
         stringValue = [(NSNumber *)value stringValue];
+
+    // Object types
+    } else if (!stringValue && typeEncoding && !strcmp(typeEncoding, @encode(id))) {
+        stringValue = [value description];
     }
 
     return stringValue;
@@ -753,7 +778,7 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
 - (const char *)typeEncodingForKeyPath:(NSString *)keyPath onObject:(id)object;
 {
     const char *encoding = NULL;
-    
+
     // Look for a matching set* method to infer the type
     NSString *selectorString = [NSString stringWithFormat:@"set%@:", [keyPath stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[keyPath substringToIndex:1] uppercaseString]]];
     NSMethodSignature *methodSignature = [object methodSignatureForSelector:NSSelectorFromString(selectorString)];
@@ -761,7 +786,14 @@ static NSString *const kPDDOMAttributeParsingRegex = @"[\"'](.*)[\"']";
         // We don't care about arg0 (self) or arg1 (_cmd)
         encoding = [methodSignature getArgumentTypeAtIndex:2];
     }
-    
+
+    // If we didn't find a setter, look for the getter
+    // We could be more exhasutive here with KVC conventions, but these two will cover the majority of cases
+    if (!encoding) {
+        NSMethodSignature *getterSignature = [object methodSignatureForSelector:NSSelectorFromString(keyPath)];
+        encoding = [getterSignature methodReturnType];
+    }
+
     return encoding;
 }
 
